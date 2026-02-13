@@ -1,0 +1,90 @@
+#pragma once
+
+#include <utility>
+#include <errno.h>
+#include <unistd.h>
+
+namespace shared_memory {
+
+/**
+ * @brief RAII wrapper for owning a file descriptor.
+ *
+ * Manages the lifecycle of a file descriptor, ensuring it is closed on destruction.
+ * Non-copyable but supports move semantics.
+ */
+class owned_fd {
+public:
+    /** @brief Sentinel value indicating an invalid or unowned file descriptor. */
+    static constexpr int INVALID_FD{-1};
+
+    /**
+     * @brief Constructs an owned_fd taking ownership of the given file descriptor.
+     * @param fd The file descriptor to own. Use INVALID_FD for no ownership.
+     */
+    explicit owned_fd(const int fd)
+    : _fd(fd)
+    {}
+
+    /** @brief Default constructor. Creates an owned_fd with no file descriptor. */
+    owned_fd() = default;
+
+    /** @brief Destructor. Closes the owned file descriptor if valid. */
+    ~owned_fd() { _reset(); }
+
+    /* Non-copyable */
+    owned_fd(const owned_fd &) noexcept = delete;
+    owned_fd& operator=(const owned_fd &) noexcept = delete;
+
+    /**
+     * @brief Move constructor. Transfers ownership from @p other.
+     * @param other The owned_fd to move from. Becomes invalid after the move.
+     */
+    owned_fd(owned_fd &&other) noexcept
+    : _fd(std::exchange(other._fd, INVALID_FD))
+    {}
+
+    /**
+     * @brief Move assignment operator. Closes current fd and takes ownership from @p other.
+     * @param other The owned_fd to move from. Becomes invalid after the move.
+     * @return Reference to *this.
+     */
+    owned_fd& operator=(owned_fd &&other) noexcept
+    {
+        if (this != &other) {
+            _reset();
+            _fd = std::exchange(other._fd, INVALID_FD);
+        }
+        return *this;
+    }
+
+    /**
+     * @brief Returns the underlying file descriptor without transferring ownership.
+     * @return The file descriptor, or INVALID_FD if none is owned.
+     */
+    [[nodiscard]] int
+    get() const noexcept { return _fd; }
+
+    /**
+     * @brief Checks whether this object owns a valid file descriptor.
+     * @return true if the file descriptor is valid (>= 0), false otherwise.
+     */
+    [[nodiscard]] bool
+    is_valid() const noexcept { return _fd >= 0; }
+
+private:
+    void
+    _reset() noexcept
+    {
+        if (_fd >= 0) {
+            const int saved_errno{errno};
+            ::close(_fd);
+            errno = saved_errno;
+            _fd = -1;
+        }
+    }
+
+private:
+    int _fd{INVALID_FD};
+};
+
+} // namespace shared_memory
